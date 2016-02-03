@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="lib" path="lib/jna-4.2.1.jar"/>
+	<classpathentry kind="lib" path="lib/jna-platform-4.2.1.jar"/>
+	<classpathentry kind="lib" path="lib/ThinkGear.jar"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="con" path="org.eclipse.fx.ide.jdt.core.JAVAFX_CONTAINER"/>
+	<classpathentry kind="lib" path="lib/opencsv-3.6.jar"/>
+	<classpathentry kind="lib" path="C:/Users/mariam/Downloads/oscP5-0.9.8/oscP5/library/oscP5.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>

@@ -1,0 +1,59 @@
+.root{
+	-fx-font-family: Consolas;
+	-fx-font-size: 14.0px;
+	-fx-text-fill: white;
+	-fx-padding: 10 20 10 20;
+	-fx-alignment: center;
+}
+
+.button {
+    -fx-background-radius: 10.0;  
+    -fx-background-color: #727272;
+    -fx-cursor: HAND ;
+    -fx-background-insets: 1.0 0.0 0.0 0.0,1.0 0.0 1.0 0.0, 1.0 0.0 1.0 0.0, 1.0 0.0 2.0 0.0;
+    -fx-font-weight: bold;
+    -fx-text-fill: white;
+    -fx-effect: dropshadow( gaussian, #212121 , 0,0,0.5,0.5 ); 
+}
+.button:hover {
+    -fx-background-color: #212121;
+    -fx-alignment: center ; 
+}
+
+.button:pressed {
+}
+
+.label{
+	-fx-font-size: 14.0px;
+	-fx-padding: 1.0;
+	-fx-text-fill: #B6B6B6 ;
+}
+.textfield {
+  	-fx-background-radius: 10, 10;
+/*	-fx-control-inner-background: #B6B6B6;
+ 	-fx-background-insets: 0, 1; */
+}
+
+.button2{
+	-fx-background-color: none;
+	-fx-alignment: bottom-center ;
+	-fx-font-size: 16px;
+	/*-fx-opacity: 0.1; */
+}
+.button2:hover {
+	-fx-background-color: none;
+	-fx-text-fill: black;
+	-fx-font-scale: 2.2;
+}
+
+.windowButtons{
+	-fx-alignment: top-center ;
+	-fx-background-radius: 50, 50;
+	-fx-background-color: transparent ;
+}
+
+.windowButtons:hover{
+	-fx-background-color: none;
+	-fx-text-fill: black;
+	-fx-font-scale: 1;
+}

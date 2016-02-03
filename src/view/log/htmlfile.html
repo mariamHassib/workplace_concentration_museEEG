@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="description" content="Data visualization"/>
+<meta charset="utf-8">
+<title>Brainwave Windows Task Logs</title>
+<style>
+body {
+	font: 16px monospace;
+	background: #F5F5F5;
+}
+.axis path {
+	display: none;
+}
+.axis line {
+	fill: none;
+	stroke: #000;
+	shape-rendering: crispEdges;
+}
+/* EEG Graph */
+.line {
+	fill: none;
+	stroke-width: 6px;
+	opacity: 0.9;
+	stroke-linecap: round;
+} .line:hover {
+	opacity: 1;
+	stroke-width: 7px;
+}
+/* Win Lines*/
+.lineW {
+	stroke-width: 7px;
+	stroke-linecap: round;
+}
+/* Task lines */
+.lineT {
+	cursor: col-resize;
+	stroke-linecap: round;
+} .lineT:hover {
+	stroke: #F44336;
+}
+/* Average EEG lines */
+.lineAv {
+	stroke-width: 6px;
+	stroke-linecap: round;
+	opacity: 0.1;
+}
+
+.text {
+	fill: #212121;
+}
+
+/* WorkingSphere Text */
+.text1 {
+}
+/* taskDescription Text */
+.text2 {
+} .text2:hover {
+	fill: #F44336;
+}
+/* activeProcess & UserActivity Text */
+.text3 {
+}
+.textM {
+	font: 18px monospace;
+}
+/*)
+#title{
+	font: 22px monospace;
+	font-variant: small-caps;
+	font-weight: bold;
+	text-decoration: underline;
+}*/
+
+/* remove + add Buttons */
+.button1 {
+	opacity: 0.2;
+	cursor: pointer;
+} .button1:hover {
+	opacity: 0.8;
+}
+
+/* save Button */
+#button2 {
+	opacity: 0.3;
+	cursor: pointer;
+} #button2:hover{
+	opacity: 0.7;
+}
+
+.imageH {
+	opacity: 0.4;
+	cursor: pointer;
+} .imageH:hover {
+	opacity: 0.7;
+}
+/* Heading text 
+.textH {
+	opacity: 1;
+	font-weight: bold;
+} .textH:hover {
+	opacity: 0.5;
+	cursor: pointer;
+}*/
+
+</style>
+</head>
+<body id='body'>
+
+<script src="d3.v3.min.js" charset="utf-8"></script> 
+<script src="queue.min.js"></script>
+<script type="text/javascript">
+
+var margin = {top: 30, right: 50, bottom: 190, left: 50},
+	width = 2000 - margin.left - margin.right,
+	widthFactor = 3; // scaling factor for the x-Axis
+	height = 750 - margin.top - margin.bottom
+
+var strings = { add: 'add entry', remove: 'remove entry', edit: 'edit entry', move: 'drag to change time',
+				visible: 'make (in)visible',
+				newTask: 'new Task', 
+				xaxis: 'Time', yaxis:'EEG',
+				save: 'Save task changes in a new CSV file',
+				}		
+var xlink = { 	plusc: 'images/plus-circle-outline.png',
+				close: 'images/close.png', 
+			}
+var save = {	xlink: 'images/download.png',
+				size: 40,
+				clicked: false 
+			}				
+
+/* EEG variables */
+var e = { 	text: ['Signal','Task Engagement', 'Attention', 'Meditation'],
+			color: ['#F44336', '#673AB7', '#03A9F4', '#4CAF50'],
+			clicked: [false,false,false,false],
+			sum: [0,0,0,0], 
+			tooltip: [	'The quality of the brainwave signal, 0 indicating a good signal and 100 indicating an off-head state.',
+						'Formula for the task engagement: beta waves / (alpha waves + theta waves)',
+						"Indicates the intensity of a user's level of mental focus, such as that which occurs during intense concentration and directed (but stable) mental activity.",
+						"Indicates the level of user's mental calmness or relaxation."]}
+var smoothing = 1; // 0 = simple centered moving average, 1 = exponentially weighted moving average
+var n = 5; // interval for SMA or Median Filtering (odd values since it is centered); value 5 according to paper ARTFul
+var ma = (n-1)/2; // window before center of SMA or Median
+
+var alpha = 0.2; // smoothing factor for EWMA (0<alpha<1); value .2 according to paper ARTFul
+var order = 2; // order for EWMA (1 or 2(double smoothing));
+var movAv = []; // Saves the moving average values
+var median = []; // Saves the median values
+var eLength; // number of eegdata entries
+var eKeys;
+function EEGs(signal,taskEngagement,attention,meditation){
+	this.signal = signal;
+	this.taskEngagement = taskEngagement;
+	this.attention = attention;
+	this.meditation = meditation;
+}
+
+/* UserActivity variables */
+var ua = {	text: ['active','idle','away'], 
+			color: ['#CFD8DC', '#607D8B', '#455A64'],
+			opacity: [0.5,0.4,0.5],
+			tooltip: [	"The user is active when the keyboard or mouse/touchpad is being used.",
+						"The state changes to 'idle' when the keyboard or mouse/touchpad is not being used for half a minute.",
+						"The user is considered as 'away' when the keyboard or mouse/touchpad is not being used for 5 minutes."]}
+var saveWins = [];
+function Wins(time,userActivity,activeProcess,windowTitle){
+	this.time = time;
+	this.userActivity = userActivity;
+	this.activeProcess = activeProcess;
+	this.windowTitle = windowTitle;
+}
+
+/* Task / WorkingSphere variables */
+var ws = {	text: ['central', 'peripheral', 'meta'],
+			strokeWidth: ['5px', '6px', '7px'], 
+			dash: ['35,35', '15,20', '1,15'],
+			tooltip: [	'Working sphere of primary importance.',
+						'Working sphere not of primary importance.',
+						'Management of working spheres (coordination, checking activities, organizing email, organizing desk, catching up with teammates, when large activities are concluded or when people return from a meeting)'],
+			letters: [7,10,4]}
+var fontFactor = 10;
+var textBox = {height: 25, width: 250}
+var saveTasks = [];
+function Tasks(time,workingSphere,description){
+	this.time = time;
+	this.workingSphere = workingSphere;
+	this.description = description;
+}
+
+/* Legend */
+var legHead = {	text: ['BRAINWAVE VALUES', 'PC USER ACTIVITY + ACTIVE PROGRAM', 'TASK WORKING SPHERE'],
+				tooltip: ['','','A working sphere is defined as a set of interrelated events, which share a common motive (or goal). It involves the communication or interaction with a particular constellation of people, uses unique resources and has its own individual time framework.'],
+				clicked: [false, false, false],
+				selection: ['path','.winValue','.taskValue'],
+				xlink: ['images/brainwave2.png', 'images/windows.png', 'images/tag.png'],
+				size: [65,60,50]}; 
+var legSize = {space: fontFactor, radius: 8},    
+	legHeight = 2*legSize.radius + legSize.space
+	legTextX = 2*legSize.radius + legSize.space
+	legTextY = 2*legSize.radius - legSize.space
+	legY = 1.18*height;
+
+	
+// Color, changedColor, Abstand des Textes zur Linie, Abstand der Achsenbeschriftung zur Achse
+var lines = { color: '#212121', color2: '#F44336', space2line: 10, space2axis: 10, wtOpacity: 0.5}
+var color1 = d3.scale.ordinal().range(e.color);
+var color2 = d3.scale.ordinal().domain(ua.text).range(ua.color);
+var color3 = d3.scale.ordinal().domain(ws.text);
+	
+var formatDate = d3.time.format("%A, %e %B %Y");//("%Y-%m-%d");
+var formatTime = d3.time.format("%I:%M:%S %p"); //("%X")
+var formatDate2 = d3.time.format("%y%m%d%H%M%S");
+var parseTime = formatDate2.parse;
+
+
+// --- Load multiple files ---
+ queue()
+//.defer(d3.csv, formatDate(new Date) + ".win.csv") // "http:localhost/data.tsv
+//.defer(d3.csv, formatDate(new Date) + ".task.csv")
+//.defer(d3.csv, formatDate(new Date) + ".eeg.csv")
+   .defer(d3.csv, "win.csv") // "http:localhost/data.tsv
+   .defer(d3.csv, "task.csv")
+   .defer(d3.csv, "eeg.csv")
+   .await(analyze);
+
+ function analyze(error, windata, taskdata, eegdata) {
+ 	if(error) { console.log(error); }
+	eLength = eegdata.length;
+ 	width = eLength * widthFactor - margin.left - margin.right;
+  // }
+  
+//----Coordinates / Axises
+var x = d3.time.scale().range([0, width]);
+var y = d3.scale.linear().range([height, 0]);	
+var xAxis = d3.svg.axis().scale(x)
+	.ticks(20)
+    .orient('bottom');
+var yAxis = d3.svg.axis().scale(y)
+	// .ticks(100)
+	// .tickValues([0,10,20,30,40,50,60,70,80,90,100])
+    .orient('left');
+	
+var svg = d3.select('body').append('svg')
+	.attr('id','canvas')
+    .attr('width', width + margin.left + margin.right)
+    .attr('height', height + margin.top + margin.bottom)
+	.append('g')
+		.attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+		
+//------------------------------------- EEG
+	var line = d3.svg.line()
+		.interpolate('basis')
+		.x(function(d) { return x(d.time); })
+		.y(function(d) { return y(d.eegs); });	
+
+	eKeys = d3.keys(eegdata[0]).filter(function(key) { return key !== "time"; });
+	var TESum = 0;
+	eegdata.forEach(function (e, i, a){
+		e.signal = +e.signal; // Int statt String
+		e.taskEngagement = +e.taskEngagement;
+		e.attention = +e.attention;
+		e.meditation = +e.meditation;
+		var eegObject = new EEGs (+e.signal, +e.taskEngagement, +e.attention, +e.meditation);
+		JSON.stringify(eegObject);
+		movAv.push(eegObject);
+		median.push(eegObject);
+		TESum += e.taskEngagement;
+		
+	});	
+	console.log("overall average TaskEngagement: " + TESum/eLength);
+
+/* MOVING AVERAGE */	
+	/* Calculates the centered moving average for the whole EEG graph. */
+	function SMA(n) {
+		for (var i=0; i<eLength; i++){
+			e.sum = new Object();
+			for (var k=0; k<eKeys.length; k++){
+				old[eKeys[k]] = 0;
+			}
+			
+			if (i>=ma && i<eLength-ma){
+				for (var j=i-ma; j<=i+ma; j++){	fillSum(j);	}
+				fillMA(i,n);
+			} 
+			if (i<ma){
+				for (var j=i; j<=i+ma; j++){	fillSum(j);	}
+				fillMA(i,ma+1);
+			}
+			if (i>=eLength-ma){
+				for (var j=i; j>=i-ma; j--){	fillSum(j);	}
+				fillMA(i,ma+1);
+			}
+		}
+	}
+	/* Calculates the sum for the moving average. */
+	function fillSum(i){
+		for (var j=0; j<eKeys.length; j++){
+			e.sum[eKeys[j]] += eegdata[i][eKeys[j]];
+		}
+	}
+	/* Calculates the moving average for a given index and a given period n */
+	function fillMA(i,n){
+		for (var j=0; j<eKeys.length; j++){
+			movAv[i][eKeys[j]] = e.sum[eKeys[j]]/n;
+		}
+		movAv[i].time = parseTime(eegdata[i].time);
+	}
+	
+	var old = new Object();
+	for (var i=0; i<eKeys.length; i++){
+		old[eKeys[i]] = movAv[0][eKeys[i]];
+	}
+	SMAorEWMA(smoothing);
+	function SMAorEWMA (smoothing){
+		smoothing == 0 ? SMA(n) : filterAndEWMA();
+	}
+	function filterAndEWMA() {
+		for (var i = 0; i<eLength; i++){
+			for (var j=0; j<eKeys.length; j++){
+				filterMedian(i, eKeys[j]);
+				calcEWMA(i, eKeys[j]);
+			}
+			movAv[i].time = parseTime(eegdata[i].time);
+		}
+	}
+	
+	// TODO review formula
+	function calcEWMA (i, prop){
+		var s1 = old[prop] + alpha*(median[i][prop] - old[prop]); // 1. order; equals: alpha*eegdata[i][prop] + (1-alpha)*(old[prop]);	
+		var s2 = old[prop] + alpha*(s1-old[prop]); // 2. order	
+		movAv[i][prop] = order == 1 ? s1 : s2;
+		old[prop] = movAv[i][prop];
+	}
+	
+	function filterMedian(i, prop){
+		var med;
+		if (i<ma || i>eLength-ma){
+			med = eegdata[i][prop];
+		} else {
+			var arr = new Array([n]);
+			for (var j=-ma; j<ma; j++){
+				arr.push(eegdata[i+j][prop]);
+			}
+			med = d3.median(arr); 
+		}
+		median[i][prop] = med;
+	}
+	
+  	eegdata.forEach(function(d) {
+    	d.time = parseTime(d.time);
+  	});
+
+	
+	console.log('eegdata');			console.log(eegdata);		console.log(eegdata[0]);	
+	console.log('movingAverage');	console.log(movAv);			console.log(movAv[0]);
+	console.log(eLength);
+//------------------------------------- TASK
+
+	taskdata.forEach(function(e, i, a){
+		// e.workingSphere = e.workingSphere;
+		// e.description = e.description;
+		var taskObject = new Tasks(parseTime(e.time), ""+e.workingSphere+"", ""+e.description+"")
+		JSON.stringify(taskObject);
+		saveTasks.push(taskObject);
+	});
+		taskdata.forEach(function(d){
+			d.time = parseTime(d.time);  
+	});
+	console.log('saveTasks'); 		console.log(saveTasks);		console.log(saveTasks[0]); 	console.log(saveTasks.length);
+	
+//------------------------------------- WIN
+	windata.forEach(function(d){
+		d.time = parseTime(d.time);
+	});
+	windata.forEach(function (e, i, a){
+		e.userActivity = e.userActivity;
+		e.activeProcess = e.activeProcess;
+		var winObject = new Wins((e.time), ""+e.userActivity+"", ""+e.activeProcess+"", ""+e.windowTitle+"")
+		JSON.stringify(winObject);
+		saveWins.push(winObject);
+	});	
+	console.log('saveWins');			console.log(saveWins[0]); 	console.log(saveWins.length);
+
+	
+//--------DOMAIN---------
+
+// Legende mit Farbwerten verknüpfen
+	color1.domain(eKeys);
+	var neuroValues = color1.domain().map(function(name){
+		return {
+			name: name,
+			values: movAv.map(function(d){ //movav statt eegdata
+				return {
+					time: d.time, 
+					eegs: +d[name]
+				};
+			})
+		};
+	});
+	x.domain(d3.extent(movAv, function(d){	return d.time;	})); //movav statt eegdata
+	y.domain([
+		d3.min(neuroValues, function(c) {	return d3.min(c.values, function(v) { 	return v.eegs; 	});}),
+		d3.max(neuroValues, function(c) {	return d3.max(c.values, function(v){	return v.eegs;	});})
+	]);
+
+//-------------------------------------------------------------------------------
+//								Axises
+//-------------------------------------------------------------------------------
+	svg.append('g').attr('class', 'x axis')
+		.attr('transform', 'translate(0,' + height +')') 
+		.call(xAxis)
+		.append('text')
+			.text(strings.xaxis)
+			.attr('x', lines.space2axis)
+			//.attr("dy", ".5em")
+			//.style("text-anchor", "end")
+			.attr('transform','translate(' + width + ',0)');
+
+	svg.append('g').attr('class', 'y axis')
+		.call(yAxis)
+		.append('text')
+			.text(strings.yaxis)
+			// .attr('transform', 'rotate(-90)')
+			.attr('x', lines.space2axis)
+			//.attr("dy", ".5em")
+			.style("text-anchor", "end")
+			;
+
+//-------------------------------------------------------------------------------
+//								WIN
+//-------------------------------------------------------------------------------
+	var strokeWidth = [];
+	var activity, process;
+
+/* UserActivity group */
+	var winValue = svg.selectAll('.winValue')
+		.data(saveWins)
+		.enter()
+		.append('g')
+			.attr('class','winValue');
+/* UserActivity lines */
+	winValue.append('line')
+		.attr('stroke', getStroke) 
+		.attr('stroke-width', getStrokeWidth)
+		.attr('opacity', getOpacity)
+		.attr('x1', getX2) 
+		.attr('x2', getX2)
+		.attr('y1', 0)
+		.attr('y2', height);
+/* UserActivity text */
+	 winValue.append('text')
+		.attr('class','text3')
+		.attr('x', getX)
+		.attr('y', height*0.5)
+		.attr('display','none')
+		.text(function(d){
+			if (d.userActivity != activity){ 
+				return d.userActivity; 
+			}
+		});
+	
+/* ActiveProcess group */
+	var winValue2 = svg.selectAll('.winValue2')
+	.data(saveWins)
+	.enter()
+	.append('g')
+		.attr('class','winValue2');
+/* ActiveProcess text */
+	winValue2.append('text')
+		.attr('class','text3')
+		.attr('transform','rotate(-90)')
+		.attr('x', -height + lines.space2line) 
+		.attr('y', function(d){ return getX(d); })
+		.attr('data-toggle','tooltip')
+		.attr('title', function(d){return d.windowTitle;})
+		.text(function(d){
+			if (d.activeProcess != process){
+				process = d.activeProcess;
+				return d.activeProcess;
+			} else {
+				return '.'; // same program different window title
+			}
+		});
+/* ActiveProcess lines (opaque when just userActivity changes) */
+	winValue.append('line')
+		.attr('class','lineW')
+		.attr('stroke',lines.color)
+		.attr('x1', getX)
+		.attr('x2', getX)
+		.attr('y1', 0)
+		.attr('y2', height)
+		.attr('display','none')
+		.attr('opacity',function(d){
+			if (d.activeProcess == ""){	return 0; } 
+			else {	return 0.1; //lineWTOpacity; 
+		}});
+
+/* Returns the x-value of the x-axis */
+	function getX(d){
+		return x(d.time);
+	}
+/* Returns the x-value of the x-axis for the userActivity lines */
+	function getX2(d,i){
+		return x(d.time) + strokeWidth[i]/2;
+	}
+		
+/* Returns the stroke-width of the userActivity line */
+	function getStrokeWidth(d,i){
+		strokeWidth[i]=0;
+		if (i<saveWins.length-1){
+			strokeWidth[i] = x(saveWins[i+1].time)-x(d.time); 
+		}
+		return strokeWidth[i];
+	}
+/* Returns the stroke-color of the userActivity line */
+	function getStroke(d,i){		
+		for (var i=0; i<ua.text.length; i++){
+			if (d.userActivity == ua.text[i]) {
+				activity = ua.text[i];
+				return ua.color[i];
+			}
+		}
+	}
+/* Returns the opacity of the userActivity line */
+	function getOpacity(d,i){
+		for (var i=0; i<ua.text.length; i++){
+			if (d.userActivity == ua.text[i]) {
+				activity = ua.text[i];
+				return ua.opacity[i];
+			}
+		}
+	}
+//-------------------------------------------------------------------------------
+//									TASK
+//-------------------------------------------------------------------------------
+
+var mouseStart;
+
+/* Makes the task lines draggable */
+	var dragListener = d3.behavior.drag()
+		.on('dragstart', function(d){
+			mouseStart = d3.select(this)[0][0].__data__.time;  // mouseStart = d3.mouse(this)[0];
+		})
+		.on('drag', function(d){
+			var x = d3.event.x;
+			d3.select(this.parentNode).select('.button1').attr('x',x); // Move x
+			d3.select(this).attr('x1',x).attr('x2',x);	// Move line
+			d3.select(this.parentNode).select('.text2').attr('y',x+1.5*fontFactor); // Move description
+		})
+		.on('dragend', function(d){
+			/* x in time */
+			var oldTime = mouseStart; 
+			var newTime = x.invert(d3.mouse(this)[0]);			
+			newTime.setMilliseconds(0);
+			var oldMillis = oldTime.getTime(); 
+			for (var i=0; i<saveTasks.length; i++){
+				var millis = saveTasks[i].time.getTime();
+				if (oldMillis == millis){
+					saveTasks[i].time = newTime;
+					d3.select(this)[0][0].__data__.time = newTime;
+					console.log("New task time for index " + i + ": " + saveTasks[i].time);
+					break;
+				}
+			}
+		});
+
+	addTask(saveTasks);
+	function addTask (d){
+/* TaskValue Group */	
+	var taskValue = svg.selectAll('.taskValue')
+		.data(saveTasks)
+		.call(dragListener)
+		.enter()
+		.append('g')
+			.attr('class','taskValue');
+/* WorkingSphere text */
+	taskValue.append('text')
+		.attr('class','text1')
+		.text(function(d){ return d.workingSphere})
+		.attr('y', function(d){ return getX(d) + lines.space2line;})
+		.attr('x', -height)
+		.attr('transform','rotate(-90)')
+		.attr('display','none');		
+/* Task line */
+	taskValue.append('line')
+		.attr('class','lineT')
+		.attr('opacity', lines.wtOpacity)
+		.attr('x1', getX)
+		.attr('x2', getX)
+		.attr('y1', 0) //height*0.58)
+		.attr('y2', height)
+		.attr('stroke', lines.color)
+		.attr('stroke-width', function(d){ 
+			for (var j=0; j<3; j++){
+				if (d.workingSphere == ws.text[j]) return ws.strokeWidth[j];
+			}
+		})
+		.attr('stroke-dasharray',function(d){ 
+			for (var j=0; j<3; j++){
+				if (d.workingSphere == ws.text[j]) return ws.dash[j];
+			}
+		})
+		.call(dragListener)
+		.attr('data-toggle','tooltip')
+		.attr('title', strings.move);;	
+/*  Task description text */
+	taskValue.append('text')
+		.attr('class','text2')
+		.attr('cursor','vertical-text')
+		.text(function(d){ return d.description;})
+		.attr('x', function(d) {return -d.description.length*fontFactor;})
+		.attr('y', function(d){ return getX(d) + 1.5*fontFactor ;})
+		.attr('transform','rotate(-90)')
+		.call(makeEditable, "text2")
+		.attr('data-toggle','tooltip')
+		.attr('title', strings.edit);
+/* x for deleting task entries */
+	taskValue.append('svg:image')
+		.attr('class','button1')
+		.attr('x', function(d) {return getX(d)-10;})
+		.attr('y', -20)
+		.attr('width', 20)
+		.attr('height', 20)
+		.attr('xlink:href', xlink.close)
+		.attr('opacity',0.2)
+		.attr('data-toggle','tooltip')
+		.attr('title', 'remove entry')
+		.on('click', function(d){
+			d3.select(this.parentNode).remove();
+			var mouseClick = d3.select(this)[0][0].__data__.time;
+			var timeInMillis = mouseClick.getTime();
+			
+			var i = findIndexByTime(saveTasks, timeInMillis);
+			saveTasks.splice(i,1);
+		});
+	}
+		
+/* Makes the task description editable */
+	function makeEditable(d, field){
+		//console.log('makeEditable', arguments);
+		this
+			.on('click', function(d){
+				var mouseClick = mouseStart = d3.select(this)[0][0].__data__.time; //d3.mouse(this)[0];
+				var p = this.parentNode;				
+				var box = this.getBBox();
+				var pBox = p.getBBox();
+				box.x -= pBox.x;
+				box.y -= pBox.y;
+				var el = d3.select(this);
+				var pEl = d3.select(p);
+				
+				var f = pEl.append('foreignObject');
+							
+				var inp = f
+					.attr('x', box.y-20)
+					.attr('y',-textBox.height)
+					.attr('width', 300)
+					.attr('height', textBox.height)
+					.append('xhtml:form')
+						.append('input')
+							.attr('style','width: ' + textBox.width - 20 + 'px;')
+							/* vordefinierter Text in Textbox */
+							.attr('value',function(d){
+								this.focus();
+								var text = pEl.select('.text2');
+								if (d.text2 == null) return d.description
+								else return d.text2;  // return d[field];
+							})
+							/* when focus lost */
+							.on('blur', function() {
+								// console.log('blur',this,arguments);
+								var txt = inp.node().value;
+								d[field] = txt;
+								function newDescription (d) { return d[field];}
+								el.text(newDescription(d));
+								pEl.select('foreignObject').remove();
+								var t = pEl.select('.text2')
+									.attr('x', function(d) {return -d[field].length*fontFactor;});										;
+								
+								var timeInMillis = mouseClick.getTime(); //x.invert(mouseClick).getTime();						
+								for (var i=0; i<saveTasks.length; i++){
+									var millis = saveTasks[i].time.getTime();
+									if (timeInMillis == millis){
+										saveTasks[i].description = txt;
+										d3.select(this)[0][0].__data__.description = txt;
+										console.log("New task description for index " + i + ": " + saveTasks[i].description);
+										break;
+									}
+								}
+								console.log(saveTasks);
+							})
+							/* when key pressed */
+							.on('keypress',function(){
+								var e = d3.event;
+								if (!e) e = window.event;
+								if (e.keyCode == 13){ // enter
+									if (typeof(e.cancelBubble) !== 'undefined'){
+										e.cancelBubble = true;
+									}
+									if (e.stopPropagation) {
+										e.stopPropagation();
+										e.preventDefault();
+									}
+									var txt = inp.node().value;
+									d[field] = txt;
+									el.text(function(d) { return d[field]; });
+									pEl.select('foreignObject').remove();
+								}
+							});	
+			});
+	}
+//-------------------------------------------------------------------------------
+//								EEG
+//-------------------------------------------------------------------------------
+
+	var neuroValue = svg.selectAll('.neuroValue')
+		.data(neuroValues) //movAv statt neuroValues
+		.enter()
+		.append('g')
+			.attr('class','neuroValue');
+
+/* EEG Graph */
+	var lineGraph = neuroValue.append('path')
+		.attr('class','line')
+		.attr('d', function(d){ return line(d.values);})
+		.style('stroke', function(d){ return color1(d.name);})
+		.attr("index", function(d, i) { return i; });
+
+//-------------------------------------------------------------------------------
+// 									Legend
+//-------------------------------------------------------------------------------
+
+var legend = d3.select('svg').append('g')
+    // .attr('width', width + margin.left + margin.right)
+    // .attr('height', height + margin.top + margin.bottom)
+	.attr('transform', 'translate(' + margin.left*fontFactor*1.2 + ',' + margin.top + ')')
+;
+/* EEG-Legend */
+	var legend1 = legend.selectAll('.legend1')
+		.data(color1.domain())
+		.enter()
+		.append('g')
+			.attr('class', 'legend1')
+			.attr('transform', function(d, i) {
+				var horz = 2*legSize.radius;
+				var vert = legY + i * legHeight;
+				return 'translate(' + horz + ',' + vert + ')';
+			})
+			.attr('data-toggle','tooltip')
+			.attr('title', function(d,i){ return e.tooltip[i]})
+			;
+	legend1.append('circle')
+		.attr('class','circle1')
+		.attr('r', legSize.radius)
+		.attr('cursor','pointer')
+		.style('fill', color1)
+		.style('stroke',color1)
+		.style('stroke-width','3px')
+		.on('click', function(d,i){
+			if (e.clicked[i]==false){
+				d3.select(this).style('fill', 'white');
+				var sel = d3.selectAll('.line').select(function(d,i2) { if (i2 == i) {return this;} })
+					.style('opacity','0');
+				e.clicked[i] = true;
+			} else {
+				d3.select(this).style('fill', color1);
+				d3.selectAll('.line').select(function(d,i2) { if (i2 == i) {return this;} })
+					.style('opacity','1');
+				e.clicked[i] = false;
+			}
+		});
+		
+	legend1.append('text')
+		.attr('x', legTextX)
+		.attr('y', legTextY)
+		.text(function(d,i) { return e.text[i]; });   
+
+/* UserActivity-Legend */
+	var legend2 = legend.selectAll('.legend2')
+		.data(color2.domain())
+		.enter()
+		.append('g')
+			.attr('class', 'legend2')
+			.attr('transform', function(d, i) {
+				var horz = fontFactor*2 * 2*legSize.radius + 2*legSize.radius;
+				var vert = legY + i * legHeight;
+				return 'translate(' + horz + ',' + vert + ')';
+			})
+			.attr('data-toggle','tooltip')
+			.attr('title', function(d,i){ return ua.tooltip[i]});
+		legend2.append('circle')
+			.attr('class','circle2')
+			.attr('r', legSize.radius)
+			.style('fill', color2)
+			.style('stroke',color2)
+			.style('stroke-width','3px')
+			.style('opacity', function(d,i) {return ua.opacity[i];});
+		legend2.append('text')
+			.attr('x', legTextX)
+			.attr('y', legTextY)
+			.text(function(d) { return d; }); 
+
+/* WorkingSphere Legend */
+	var legend3 = legend.selectAll('.legend3')
+		.data(color3.domain())
+		.enter()
+		.append('g')
+			.attr('class','legend3')
+			.attr('transform', function(d, i) {
+				var horz = fontFactor*4 * 2*legSize.radius + 2*legSize.radius;
+				var vert = legY + i * legHeight;
+				return 'translate(' + horz + ',' + vert + ')';
+			})
+			.attr('data-toggle','tooltip')
+			.attr('title', function(d,i){ return ws.tooltip[i]});
+	legend3.append('line')
+		.attr('class','lineT')
+		.attr('x1', function(d,i){ return legTextX+(ws.letters[i]+2)*fontFactor ;})
+		.attr('x2', legTextX+18*fontFactor)
+		.attr('y1', legTextY-2)
+		.attr('y2', legTextY-2)
+		.style('stroke', lines.color)
+		.style('stroke-width','2px')
+		.style('opacity','1')
+		.attr('stroke-dasharray',function(d,i){ return ws.dash[i]; });
+	legend3.append('text')
+		.attr('x', legTextX)
+		.attr('y',legTextY)
+		.text(function(d) { return d; });
+	legend3.append('svg:image')
+		.attr('class','button1')
+		.attr('x', -legSize.radius*1.5)
+		.attr('y', -legSize.radius*1.5)
+		.attr('width', legSize.radius*3)
+		.attr('height', legSize.radius*3)
+		.attr('xlink:href', xlink.plusc)
+		.attr('opacity',0.2)
+		.attr('data-toggle','tooltip')
+		.attr('title', strings.add)
+		.on('click', function(d,i){ 
+			/* add new task */
+			var taskObject = new Tasks(eegdata[0].time, ws.text[i], 'new '+ws.text[i]+' task');
+			JSON.stringify(taskObject);
+			saveTasks.push(taskObject);
+			console.log(saveTasks);
+			d3.selectAll('.taskValue').remove();
+			addTask(saveTasks);
+		;});
+	
+	var legHeading = legend.selectAll('.legHead')
+		.data(legHead.text)
+		.enter()
+		.append('g')
+			.attr('class','legHead')
+			.attr('transform', function(d, i) {
+				var horz = i*2*fontFactor*2*legSize.radius;
+				var vert = legY;
+				return 'translate(' + horz + ',' + vert + ')';
+			});
+	legHeading.append('svg:image')
+		.attr('class','imageH')
+		.attr('x', function(d,i) {return -1.3*legHead.size[i]; })
+		.attr('y', 0)
+		.attr('width',function(d,i) {return legHead.size[i]; })
+		.attr('height',function(d,i) {return legHead.size[i]; })
+		.attr('xlink:href', function(d,i){ return legHead.xlink[i]; })
+		.attr('data-toggle','tooltip')
+		.attr('title', function(d,i) {return legHead.text[i] + '\n' + legHead.tooltip[i] + '\n' + strings.visible;})
+		.on('click',function(d,i){	
+			if (!legHead.clicked[i]){
+				if (i==0){
+					d3.selectAll('.circle1').style('fill', 'white');
+					addAverage();
+					for (var j = 0; j<eKeys.length; j++){
+						e.clicked[j] = true;
+					}
+				}
+				if (i==1){ d3.selectAll('.winValue2').style('opacity','0'); 
+					d3.selectAll('.circle2').style('fill', 'white');	
+				}
+				d3.selectAll(legHead.selection[i]).style('opacity','0');
+				legHead.clicked[i] = true;
+			}
+			else {
+				if (i==0){
+					d3.selectAll('.circle1').style('fill', color1);	
+					d3.selectAll('.average').remove();
+					for (var j = 0; j<eKeys.length; j++){
+						e.clicked[j] = false;
+					}
+				}
+				if (i==1){ d3.selectAll('.winValue2').style('opacity','1'); 
+					d3.selectAll('.circle2').style('fill', color2);
+				}
+				d3.selectAll(legHead.selection[i]).style('opacity','1');
+				legHead.clicked[i] = false;					
+			}
+		});
+//-------------------------------------------------------------------------------
+// 									Buttons
+//-------------------------------------------------------------------------------			
+	var menu = d3.select('svg').append('g')
+		.attr('width', width + margin.left + margin.right)
+		.attr('height', height + margin.top + margin.bottom)
+		.attr('transform', 'translate(' +  margin.left + ',' + margin.top + ')');	
+	/* save Button */
+	menu.append('svg:image')
+		.attr('id', 'button2')
+		.attr('x', 0)
+		.attr('y', legY+fontFactor)
+		.attr('width', save.size)
+		.attr('height',save.size)
+		.attr('xlink:href', save.xlink)
+		.attr('data-toggle','tooltip')
+		.attr('title', strings.save)
+		.on('click', function (){ 
+			save.clicked = true; 
+			json2csv(saveTasks);
+		});	
+	/* Log date */
+	menu.append('text')
+		.attr('class','textM')
+		.attr('x', save.size*1.5)
+		.attr('y', legY+2*fontFactor)	
+		.text(formatDate(movAv[0].time));
+	/* Log time */
+	menu.append('text')
+		.attr('class','textM')
+		.attr('x', save.size*1.5)
+		.attr('y', legY+5*fontFactor)	
+		.text(formatTime(movAv[0].time)+' - '+formatTime(movAv[eLength-1].time));
+
+		
+/* Writes the changed task data in an csv file which can then be opened or saved. */		
+function json2csv(JSONData) {
+		saveTasks.sort( sortByProp("time") );
+	if (save.clicked){
+		//If JSONData is not an object then JSON.parse will parse the JSON string in an Object
+		// var arrData = typeof JSONData != 'object' ? JSON.parse(JSONData) : JSONData;
+		var arrData = JSON.parse(JSON.stringify(JSONData)); // copy without reference
+		for (var i=0; i<JSONData.length; i++){
+			arrData[i].time = new Date(arrData[i].time);
+			arrData[i].time = formatDate2(arrData[i].time);
+		}
+
+		var CSV = "";    
+		// ------ Generate header -----
+		var row = "";        
+		// Extract the label from 1st index of on array
+		for (var index in arrData[0]) {  
+			// convert each value to string and comma-seprated
+			row += index + ',';
+		}
+		row = row.slice(0, -1); 
+		//append Label row with line break
+		CSV += row + '\r\n';
+		// ------- Generate rows --------
+		// extract each row
+		for (var i = 0; i < arrData.length; i++) {
+			var row = "";      
+			// extract each column make it comma-separated
+			for (var index in arrData[i]) {
+				row += '' + arrData[i][index] + ',';
+			}
+			row.slice(0, row.length - 1);
+			CSV += row + '\r\n';	//add a line break after each row
+		}
+
+		var fileName = "task2";        
+		var uri = 'data:text/csv;charset=utf-8,' + escape(CSV); // Initialize csv file format 
+
+		// Generate a temp <a> tag
+		var link = document.createElement("a");    
+		link.href = uri;
+		// set the visibility hidden so it will not effect on your web-layout
+		// link.style = "visibility:hidden";
+		link.download = fileName + ".csv";
+		// this part will append the anchor tag and remove it after automatic click
+		document.body.appendChild(link);
+		link.click();
+		// document.body.removeChild(link);
+	}
+}
+
+/* Returns the index of the oldTime in the json-array. */
+	function findIndexByTime(d, oldMillis){
+		for (var i=0; i<d.length; i++){
+			var millis = d[i].time.getTime();
+			if (millis == oldMillis){
+				return i;
+			}
+		}
+		return -1;
+	}
+
+var average4ws; 
+function addAverage(){	
+	average4ws = new Object();
+	for (var i = 0; i<ws.text.length; i++){
+		average4ws[ws.text[i]] = [];
+	}
+	saveTasks.sort(sortByProp('time'));
+	
+	var av = svg.selectAll('.average')
+	.data(saveTasks)
+	.call(dragListener)
+	.enter()
+	.append('g')
+		.attr('class','average');	
+
+	for (var i=0; i<saveTasks.length-1; i++){
+		var aY = [0,0,0,0];
+		var a = [0,0,0,0];
+		var s = [0,0,0,0];
+		var index1 = findIndexByTime(movAv, saveTasks[i].time.getTime());
+		var index2 = findIndexByTime(movAv, saveTasks[i+1].time.getTime());
+		var x1 = getX(saveTasks[i]);
+		var x2 = getX(saveTasks[i+1]);
+		var sphere = saveTasks[i].workingSphere;
+		var quot = index2-index1;
+		/* Calculate sum for average */
+		for (var j=index1; j<index2; j++) {
+			for (var k=0; k<eKeys.length; k++){
+				s[k] += movAv[j][eKeys[k]];
+			}
+		}
+		/* Calculate average and draw line */
+		for (var j=0; j<eKeys.length; j++){
+			a[j] = s[j]/quot;
+			aY[j] = y(a[j]);
+
+			av.append('line')
+				.attr('class','lineAv')
+				.attr('x1', x1)
+				.attr('x2', x2)
+				.attr('y1', aY[j])
+				.attr('y2', aY[j])
+				.attr('stroke',e.color[j]);
+		}
+		average4ws[sphere].push(a[1]);
+	}
+	var aY = [0,0,0,0];
+	var a = [0,0,0,0];
+	var s = [0,0,0,0];
+	var index1 = findIndexByTime(movAv, saveTasks[saveTasks.length-1].time.getTime());
+	var index2 = findIndexByTime(movAv, movAv[movAv.length-1].time.getTime());
+	var x1 = getX(saveTasks[saveTasks.length-1]);
+	var x2 = getX(movAv[movAv.length-1]);
+	var sphere = saveTasks[saveTasks.length-1].workingSphere;
+	
+	var quot = index2-index1;
+	for (var j=index1; j<index2; j++) {
+		for (var k=0; k<eKeys.length; k++){
+			s[k] += movAv[j][eKeys[k]];
+		}
+	}
+	for (var j=0; j<eKeys.length; j++){
+		a[j] = s[j]/quot;
+		aY[j] = y(a[j]);
+		av.append('line')
+			.attr('class','lineAv')
+			.attr('x1', x1)
+			.attr('x2', x2)
+			.attr('y1', aY[j])
+			.attr('y2', aY[j])
+			.attr('stroke',e.color[j]);
+	}
+	average4ws[sphere].push(a[1]);
+	// calcAv4WS();
+}
+
+/* Calculates the average task engagment value for every working sphere. */
+// function calcAv4WS (){
+	// var s = [0,0,0];
+	// var a = [0,0,0];
+	// // TODO
+	// var q = [average4ws.central.length, average4ws.peripheral.length, average4ws.meta.length];
+	// var sphere = ws.text;
+	
+	// for (var j=0; j<ws.text.length; j++){
+		// for (var i=0; i<q[j]; i++){
+			// s[j] += average4ws[sphere[j]][i];
+		// }
+		// a[j] = s[j]/q[j];
+	// }
+// }
+
+
+/* help function for sorting json data in arrays */
+function sortByProp(prop){
+   return function(a,b){
+      if( a[prop] > b[prop]){
+          return 1;
+      }else if( a[prop] < b[prop] ){
+          return -1;
+      }
+      return 0;
+   }
+}
+} 
+</script>
+</body>
+</html>
