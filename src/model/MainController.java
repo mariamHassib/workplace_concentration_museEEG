@@ -16,26 +16,28 @@ import model.Feedback.Work;
 
 public class MainController extends Application {
 
-	public static FileHandler fhWin, fhEEG, fhTask, fhMain;
+	public static FileHandler fhWin, fhEEG, fhTask, fhMain, fhMuse;
 	private static final Logger lMain = Logger.getLogger(MainController.class.getName());
 	private static final Logger lEEG = Logger.getLogger(EEG.class.getName());
 	private static final Logger lWin = Logger.getLogger(Activity.class.getName());
 	private static final Logger lTask = Logger.getLogger(Feedback.class.getName());
+	private static final Logger lmuse = Logger.getLogger(museLogger.class.getName());
 
 	ThinkGearSocket neuroSocket;
 	View view;
 	WindowsUtil win;
 	Activity activity;
 	EEG eeg;
-	MuseOscServer muse;
+	museLogger muse;
 	Feedback feedback;
 
 	@Override
 	public void start(Stage primaryStage) {
 		view = new View(this);
 		eeg = new EEG();
-		muse=new MuseOscServer();
 		eeg.addObserver(view);
+		muse=new museLogger();
+		muse.addObserver(view);
 	}
 
 	public static void main(String[] args) {
@@ -49,6 +51,7 @@ public class MainController extends Application {
 			fhWin = new FileHandler("src/view/log/win.csv");
 			fhTask = new FileHandler("src/view/log/task.csv");
 			fhMain = new FileHandler("src/view/log/main.log");
+			fhMuse = new FileHandler("src/view/log/muse.csv");
 		} catch (SecurityException e) {
 			lMain.log(Level.WARNING, e.toString());
 		} catch (IOException e) {
@@ -58,25 +61,30 @@ public class MainController extends Application {
 		lWin.addHandler(fhWin);
 		lTask.addHandler(fhTask);
 		lMain.addHandler(fhMain);
+		lmuse.addHandler(fhMuse);
 		fhEEG.setFormatter(new LogFormatter());
 		fhWin.setFormatter(new LogFormatter());
 		fhTask.setFormatter(new LogFormatter());
 		fhMain.setFormatter(new SimpleFormatter());
+		fhMuse.setFormatter(new LogFormatter());
 	}
 
 	public void startEEGLogging() {
+		muse.startMuseLogging();
+		lMain.log(Level.SEVERE, "Muse loggin started");
 		// eeg = new EEG();
 		// eeg.addObserver(view);
-		neuroSocket = new ThinkGearSocket(eeg);
-		try {
-			neuroSocket.start();
-			lMain.log(Level.SEVERE, "Socket start");
+	//	neuroSocket = new ThinkGearSocket(eeg);
+	//	try {
+		//	neuroSocket.start();
+		//	lMain.log(Level.SEVERE, "Socket start");
 			
 			//view.changeStatus(Strings.THINKGEAR_CONNECTED.string, 3);
-		} catch (Exception e) {
+		//} catch (Exception e) {
 			 //view.changeStatus(Strings.THINKGEAR_NOT_CONNECTED.string, 3);
-		}
+	//	}
 	}
+	
 
 	public void startPALogging() {
 		// PROCESS-LOGGING
@@ -92,13 +100,20 @@ public class MainController extends Application {
 
 	@Override
 	public void stop() {
-		neuroSocket.stop();
+		
 		try {
-			super.stop();
-			// eeg.deleteObservers();
+		muse.stopMuseLogging();
+		lMain.log(Level.SEVERE, "Muse loggin stopped");
 		} catch (Exception e) {
-			lMain.log(Level.SEVERE, "Socketstop failed", e);
-		}
+				lMain.log(Level.SEVERE, "Muse Stop failed", e);
+			}
+		//neuroSocket.stop();
+		//try {
+		//	super.stop();
+			// eeg.deleteObservers();
+	//	} catch (Exception e) {
+		//	lMain.log(Level.SEVERE, "Socketstop failed", e);
+		//}
 	}
 
 	// ------------ GETTER + SETTER -------------------------

@@ -175,6 +175,7 @@ public class View implements Observer {
 		MainController.fhMain.close();
 		MainController.fhWin.close();
 		MainController.fhTask.close();
+		MainController.fhMuse.close();
 		connectionButton.setText(Strings.START.string);
 		connectionButton.setOnAction(ae -> startLogging());
 		pane.getChildren().remove(fbView);

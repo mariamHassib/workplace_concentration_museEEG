@@ -41,6 +41,10 @@ class LogFormatter extends Formatter {
 			tableTitles = "workingSphere" + s + "description";
 		if (h.equals(MainController.fhEEG))
 			tableTitles = "signal" + s + "taskEngagement" + s + "attention" + s + "meditation";
+		if (h.equals(MainController.fhMuse))
+			tableTitles = "delta_relative" + s + "theta_relative" + s + "alpha_relative" + s + "beta_relative"
+			+ s + "gamma_relative" + "delta_session_score"+ s+ "theta_session_score"+s+"alpha_session_score"
+			+ s + "beta_session_score"+ s + "gamma_session_score"+s+"blink" + s + "jaw_Clench" + s + "concentration" + s +"mellow" ;
 		return "time" + s + tableTitles + "\n";
 	}
 
